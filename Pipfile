@@ -11,6 +11,8 @@ pyglottolog = "*"
 treelib = "*"
 lingpy = "*"
 ipython = "*"
+colorama = "*"
+termcolor = "*"
 
 [dev-packages]
 

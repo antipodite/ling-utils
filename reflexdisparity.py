@@ -31,7 +31,8 @@ from pyglottolog import Glottolog
 
 from Levenshtein import distance
 from tabulate import tabulate
-
+from colorama import Fore
+from termcolor import colored
 
 def groupby(seq, access_fn):
     indices = {}
@@ -80,11 +81,10 @@ class CognateSet:
         matrix = chunk(dists, self.n_reflexes) # Chop into rows
         return matrix
 
-    @property
     def mean_distance(self):
         """Mean pairwise Levenshtein distance"""
         flat = [d for subseq in self.matrix() for d in subseq]
-        return sum(flat) / self.n_reflexes
+        return sum(flat) / self.n_reflexes**2
 
     def table(self):
         """Display the distance matrix formatted as a table"""
@@ -92,8 +92,16 @@ class CognateSet:
         return tabulate(table, headers=self.reflexes)
 
     def __str__(self):
-        return "<{}> \"{}\" : {} reflexes".format(self.protoform, self.gloss, self.n_reflexes)
+        return "<{}> \"{}\" : {} reflexes. Mean pairwise distance = {}".format(
+            self.protoform,
+            self.gloss,
+            self.n_reflexes,
+            round(self.mean_distance(), 2)
+        )
 
+    def __len__(self):
+        return self.n_reflexes
+    
 
 def load_reflex_data(fname, protolangs=False, affixes=False):
     """Expects sheet with at least Protoform | Reflex | Glottocode"""
@@ -107,6 +115,7 @@ def load_reflex_data(fname, protolangs=False, affixes=False):
             protoform = group[0]["ProtoForm"],
             reflexes = [row["Reflex"] for row in group],
             glottocodes = [row["GlottoCode"] for row in group],
+            gloss = group[0]["ProtoFormGloss"],
             affixes=affixes
         )
         cognatesets.append(cs)
@@ -123,25 +132,52 @@ def run():
     parser.add_argument(
         "--sets",
         type=str,
-        help="Protoform for cognate sets to display, separated by commas"
+        help="Protoform for specific cognate sets to display, separated by commas"
     )
     parser.add_argument(
         "--rm_affixes",
         action="store_false",
         help="Whether to attempt to remove morphological affixes from cognates"
     )
+    parser.add_argument(
+        "--cutoff",
+        type=int,
+        help="Number of cognate sets to print info for when running on all"
+    )
+    parser.add_argument(
+        "--n_reflexes",
+        type=int,
+        help="Don't display cognate sets with a number of reflexes below this value"
+    )
     parser.add_argument("sheet", type=Path, help="Path of input spreadsheet, in CSV format")
     args = parser.parse_args()
 
+    #
+    # Do the stuff
+    #
+
     cognatesets = load_reflex_data(args.sheet, affixes=args.rm_affixes)
-    print("ACD Cognate disparity analysis v0: Found {} cognate sets".format(len(cognatesets)))
+    print(
+        colored(
+            "ACD Cognate disparity analysis v0: Found {} cognate sets" \
+            .format(len(cognatesets)),
+            'yellow'
+        )
+    )
     if args.sets:
         protoforms = args.sets.split(",")
         for cs in cognatesets:
             if cs.protoform in protoforms:
                 print("Cognate set: {}".format(cs))
                 print(cs.table())
-
+    else:
+        filtered = sorted(cognatesets, key=lambda c: c.mean_distance(), reverse=True)
+        if args.cutoff:
+            filtered = filtered[:args.cutoff]
+        elif args.n_reflexes:
+            filtered = [cs for cs in filtered if cs.n_reflexes >= args.n_reflexes]
+        for cs in filtered:
+            print(cs)
 
 if __name__ == "__main__":
     run()
