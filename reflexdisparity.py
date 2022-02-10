@@ -24,6 +24,7 @@ from collections import namedtuple, Counter
 from itertools import product, accumulate
 from pathlib import Path
 from argparse import ArgumentParser
+from re import split, sub, findall
 
 from cldfcatalog import Config
 from pyglottolog import Glottolog
@@ -48,34 +49,53 @@ def chunk(seq, size):
         yield seq[i:i + size]
 
 
+def rm_affixes(lexeme, return_all=False):
+    """Very crude way to remove prefixes-, -postfixes, and <infixes> from an ACD form"""
+    match = "^\S+-|-\S+$|<\S+>"
+    root = sub(match, "", lexeme)
+    affixes = findall(match, lexeme)
+    if return_all:
+        return root, matches
+    else:
+        return root
+
+
 class CognateSet:
-    def __init__(self, protoform, reflexes=[], glottocodes=[]):
+    def __init__(self, protoform, reflexes=[], glottocodes=[], gloss=None, affixes=False):
         self.protoform = protoform
-        self.reflexes = reflexes
+        if affixes:
+            self.reflexes = reflexes
+        else:
+            self.reflexes = [rm_affixes(r) for r in reflexes]
         self.glottocodes = glottocodes
+        self.gloss = gloss
 
     @property
     def n_reflexes(self):
         return len(self.reflexes)
 
-    @property
-    def matrix(self):
+    def matrix(self, measure=distance):
         """Pairwise Levenshtein distance between reflexes for this ACD cognate set"""
-        dists = [distance(a, b) for a, b in  product(self.reflexes, repeat=2)]
+        dists = [measure(a, b) for a, b in  product(self.reflexes, repeat=2)]
         matrix = chunk(dists, self.n_reflexes) # Chop into rows
         return matrix
 
     @property
     def mean_distance(self):
-        flat = [d for subseq in self.matrix for d in subseq]
+        """Mean pairwise Levenshtein distance"""
+        flat = [d for subseq in self.matrix() for d in subseq]
         return sum(flat) / self.n_reflexes
 
-    def __str__(self):
-        table = [ [r] + row for r, row in zip(self.reflexes, self.matrix) ]
+    def table(self):
+        """Display the distance matrix formatted as a table"""
+        table = [ [r] + row for r, row in zip(self.reflexes, self.matrix()) ]
         return tabulate(table, headers=self.reflexes)
 
+    def __str__(self):
+        return "<{}> \"{}\" : {} reflexes".format(self.protoform, self.gloss, self.n_reflexes)
 
-def load_reflex_data(fname, protolangs=False):
+
+def load_reflex_data(fname, protolangs=False, affixes=False):
     """Expects sheet with at least Protoform | Reflex | Glottocode"""
     with open(fname) as f:
         rows = [row for row in DictReader(f)]
@@ -86,7 +106,8 @@ def load_reflex_data(fname, protolangs=False):
         cs = CognateSet(
             protoform = group[0]["ProtoForm"],
             reflexes = [row["Reflex"] for row in group],
-            glottocodes = [row["GlottoCode"] for row in group]
+            glottocodes = [row["GlottoCode"] for row in group],
+            affixes=affixes
         )
         cognatesets.append(cs)
     return cognatesets
@@ -104,16 +125,22 @@ def run():
         type=str,
         help="Protoform for cognate sets to display, separated by commas"
     )
+    parser.add_argument(
+        "--rm_affixes",
+        action="store_false",
+        help="Whether to attempt to remove morphological affixes from cognates"
+    )
     parser.add_argument("sheet", type=Path, help="Path of input spreadsheet, in CSV format")
     args = parser.parse_args()
 
-    cognatesets = load_reflex_data(args.sheet)
-    print(len(cognatesets))
+    cognatesets = load_reflex_data(args.sheet, affixes=args.rm_affixes)
+    print("ACD Cognate disparity analysis v0: Found {} cognate sets".format(len(cognatesets)))
     if args.sets:
         protoforms = args.sets.split(",")
         for cs in cognatesets:
             if cs.protoform in protoforms:
-                print(cs)
+                print("Cognate set: {}".format(cs))
+                print(cs.table())
 
 
 if __name__ == "__main__":

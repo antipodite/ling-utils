@@ -9,6 +9,8 @@ python-levenshtein = "*"
 tabulate = "*"
 pyglottolog = "*"
 treelib = "*"
+lingpy = "*"
+ipython = "*"
 
 [dev-packages]
 
